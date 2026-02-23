@@ -128,7 +128,7 @@ def render_page1():
     if st.button("게임 시작"):
         init_game_state()
         st.session_state.current_page = 2
-        st.experimental_rerun()
+        st.rerun()   # ⬅⬅ 여기 수정 (experimental_rerun → rerun)
 
     with st.expander("디버그용 / 개발 단계에서는 역할 확인 (나중에 숨겨도 됨)"):
         st.write("Player1 역할 코드:", st.session_state.player1_role)
@@ -212,7 +212,7 @@ def render_page2():
 
         if st.button("정체 지목 페이지로 이동"):
             st.session_state.current_page = 3
-            st.experimental_rerun()
+            st.rerun()   # ⬅⬅ 여기도 수정
 
 
 def handle_question_click(question_id: int, question_text: str):
@@ -279,7 +279,7 @@ def render_page3():
     if st.button("다시 시작하기"):
         init_game_state()
         st.session_state.current_page = 1
-        st.experimental_rerun()
+        st.rerun()   # ⬅⬅ 여기도 수정
 
 
 # ============================================================
@@ -319,4 +319,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
