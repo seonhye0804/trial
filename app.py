@@ -215,7 +215,7 @@ def render_question_section():
                     st.caption(card["text"])
                 else:
                     # 아직 안 클릭한 카드는 질문 문장 숨김
-                    st.caption("질문 숨김")
+                    st.caption("  ")
 
     st.markdown("---")
     st.subheader("질문 & 답변 기록")
