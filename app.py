@@ -201,7 +201,10 @@ def render_question_section():
         cols = st.columns(3)
         for card, c in zip(row, cols):
             with c:
-                 if st.button(f"카드 {card['id']}", key=f"qcard_{card['id']}"):
+                # 버튼을 눌렀을 때:
+                # 1) 질문/답변 로직 실행
+                # 2) 이 카드의 질문 문장을 '열린 상태'로 기록
+                if st.button(f"카드 {card['id']}", key=f"qcard_{card['id']}"):
                     handle_question_click(card["id"], card["text"], asker)
                     if card["id"] not in st.session_state.revealed_questions:
                         st.session_state.revealed_questions.append(card["id"])
