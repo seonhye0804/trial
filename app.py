@@ -71,6 +71,8 @@ def init_session_state():
         st.session_state.show_role = None  # "A", "B", 또는 None
     if "question_log" not in st.session_state:
         st.session_state.question_log = []  # (질문id, 질문문구, 답변, 질문자(A/B))
+    if "revealed_questions" not in st.session_state:
+        st.session_state.revealed_questions = []
     if "guess_A" not in st.session_state:
         st.session_state.guess_A = ""
     if "guess_B" not in st.session_state:
@@ -199,9 +201,18 @@ def render_question_section():
         cols = st.columns(3)
         for card, c in zip(row, cols):
             with c:
-                if st.button(f"카드 {card['id']}", key=f"qcard_{card['id']}"):
+                 if st.button(f"카드 {card['id']}", key=f"qcard_{card['id']}"):
                     handle_question_click(card["id"], card["text"], asker)
-                st.caption(card["text"])
+                    if card["id"] not in st.session_state.revealed_questions:
+                        st.session_state.revealed_questions.append(card["id"])
+                        st.rerun()
+
+                # 이 카드를 한 번이라도 클릭했다면 그때부터 질문 문장 보여주기
+                if card["id"] in st.session_state.revealed_questions:
+                    st.caption(card["text"])
+                else:
+                    # 아직 안 클릭한 카드는 질문 문장 숨김
+                    st.caption("질문 숨김")
 
     st.markdown("---")
     st.subheader("질문 & 답변 기록")
