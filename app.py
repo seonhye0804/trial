@@ -1,11 +1,11 @@
 import random
+import string
 import streamlit as st
 
 # ============================================================
 # 0. 게임 데이터 (나중에 채워 넣을 부분)
 # ============================================================
 
-# TODO: 실제 사용할 역할(캐릭터) 코드와 이름을 여기에 추가하세요.
 ROLES = [
     {"code": "nietzsche", "name": "니체"},
     {"code": "han_byung_chul", "name": "한병철"},
@@ -14,7 +14,6 @@ ROLES = [
     {"code": "bartleby", "name": "바틀비"},
 ]
 
-# TODO: 실제 질문 카드 내용을 여기에 넣으세요. (6장 기준)
 QUESTION_CARDS = [
     {"id": 1, "text": "질문 1 예시: 당신은 긍정성의 폭력에 시달린 적 있나요?"},
     {"id": 2, "text": "질문 2 예시: 당신에게 '성과'란 무엇인가요?"},
@@ -24,9 +23,6 @@ QUESTION_CARDS = [
     {"id": 6, "text": "질문 6 예시: 당신이 피로를 느끼는 순간은 언제인가요?"},
 ]
 
-# TODO: 역할별·질문별 답변을 여기에 채워 넣으세요.
-# 구조 예시:
-# ROLE_ANSWERS["nietzsche"][1]  -> 니체가 질문 1에 할 법한 답변
 ROLE_ANSWERS = {
     "nietzsche": {
         1: "[니체] 답변 예시 (질문 1) - TODO: 실제 내용 채우기",
@@ -72,249 +68,300 @@ ROLE_ANSWERS = {
 
 
 # ============================================================
-# 1. 헬퍼 함수들
+# 1. 앱 전체에서 공유되는 "방 정보" 저장소 (모든 세션 공유)
 # ============================================================
 
+@st.singleton
+def get_rooms():
+    """
+    앱 전체에서 공유하는 방(room) 딕셔너리.
+    여러 브라우저(세션)가 같은 room_code로 접속하면
+    이 딕셔너리를 통해 서로 상태를 공유한다.
+    """
+    return {}  # {room_code: room_state_dict}
+
+
+# ============================================================
+# 2. 유틸 함수들
+# ============================================================
+
+def generate_player_id(n=8):
+    """각 브라우저 세션을 구분하기 위한 간단한 랜덤 ID"""
+    return "".join(random.choices(string.ascii_letters + string.digits, k=n))
+
+
 def get_role_name_by_code(code: str) -> str:
-    """역할 코드로부터 표시용 이름을 찾아주는 함수"""
     for r in ROLES:
         if r["code"] == code:
             return r["name"]
-    return code  # 못 찾으면 코드 그대로
+    return code
 
 
-def init_game_state():
-    """새 게임 시작 시 session_state를 초기화"""
-    # 두 플레이어에게 서로 다른 역할을 배정 (단순 랜덤 2개)
-    chosen_roles = random.sample(ROLES, 2)
-    player1_role = chosen_roles[0]["code"]
-    player2_role = chosen_roles[1]["code"]
-
-    st.session_state.page = 1
-    st.session_state.player1_role = player1_role
-    st.session_state.player2_role = player2_role
-
-    # 이 앱은 한 화면에서 두 사람이 함께 본다고 가정.
-    # 각자 어떤 역할인지 보여 줄 때 분리해서 안내할 수 있음.
-    st.session_state.current_page = 1  # 1: 시작, 2: 질문/답변, 3: 정체 지목
-    st.session_state.clicked_questions = []  # 이미 클릭한 질문 id 목록
-    st.session_state.answer_log = []  # (질문id, 질문문구, 답변) 기록
-    st.session_state.guess_input = ""
-    st.session_state.result_message = ""
+def init_session_state():
+    """각 세션(브라우저)에서 한 번만 초기화"""
+    if "player_id" not in st.session_state:
+        st.session_state.player_id = generate_player_id()
+    if "room_code" not in st.session_state:
+        st.session_state.room_code = ""
+    if "player_name" not in st.session_state:
+        st.session_state.player_name = ""
+    if "joined" not in st.session_state:
+        st.session_state.joined = False
+    if "my_role_code" not in st.session_state:
+        st.session_state.my_role_code = None
+    if "guess_input" not in st.session_state:
+        st.session_state.guess_input = ""
+    if "result_message" not in st.session_state:
+        st.session_state.result_message = ""
 
 
-def ensure_state():
-    """session_state에 필요한 값들이 없으면 기본값 세팅"""
-    if "current_page" not in st.session_state:
-        init_game_state()
+def get_or_create_room(room_code: str):
+    """room_code에 해당하는 방 상태를 가져오거나 새로 만든다."""
+    rooms = get_rooms()
+    if room_code not in rooms:
+        rooms[room_code] = {
+            "players": {},       # player_id -> {"name": str, "role_code": None}
+            "started": False,
+            "question_log": [],  # [(question_id, question_text, answer, answered_by_player_id)]
+        }
+    return rooms[room_code]
+
+
+def assign_roles_for_room(room):
+    """해당 방에 등록된 2명의 플레이어에게 역할을 랜덤 배정"""
+    player_ids = list(room["players"].keys())
+    if len(player_ids) != 2:
+        return  # 2명 아닐 때는 배정 안 함
+
+    role_codes = [r["code"] for r in ROLES]
+    random.shuffle(role_codes)
+    chosen_roles = role_codes[:2]
+
+    room["players"][player_ids[0]]["role_code"] = chosen_roles[0]
+    room["players"][player_ids[1]]["role_code"] = chosen_roles[1]
+    room["started"] = True
+
+
+def get_opponent_role_code(room, my_player_id):
+    """상대방의 역할 코드 반환 (없으면 None)"""
+    for pid, info in room["players"].items():
+        if pid != my_player_id:
+            return info.get("role_code")
+    return None
 
 
 # ============================================================
-# 2. 페이지별 UI & 로직
+# 3. UI: 방 접속 & 게임 시작
 # ============================================================
 
-def render_page1():
-    """페이지 1 - 게임 시작 페이지"""
-    st.header("페이지 1: 피로사회 마피아 게임 시작")
+def render_lobby():
+    st.header("피로사회 마피아 게임")
 
     st.markdown(
         """
-        - 플레이어 2명 (학생 1, 교사 1)이 함께 플레이합니다.  
-        - '게임 시작' 버튼을 누르면, 시스템이 각 플레이어에게 **비밀 역할**을 무작위로 부여합니다.  
-        - 목표: **질문 카드**를 활용해 상대방의 정체(역할)를 맞히는 것!
+        1. 두 플레이어가 **같은 방 코드**와 **각자의 이름**을 입력합니다.  
+        2. 두 사람이 모두 접속하면, '게임 시작' 버튼이 활성화됩니다.  
+        3. 게임이 시작되면, 각자 **자신의 역할만** 볼 수 있습니다.
         """
     )
 
-    if st.button("게임 시작"):
-        init_game_state()
-        st.session_state.current_page = 2
-        st.rerun()   # ⬅⬅ 여기 수정 (experimental_rerun → rerun)
+    col1, col2 = st.columns(2)
 
-    with st.expander("디버그용 / 개발 단계에서는 역할 확인 (나중에 숨겨도 됨)"):
-        st.write("Player1 역할 코드:", st.session_state.player1_role)
-        st.write("Player2 역할 코드:", st.session_state.player2_role)
-
-
-def render_page2():
-    """페이지 2 - 역할 확인 + 질문 카드 화면"""
-    st.header("페이지 2: 역할 확인 & 질문 카드")
-
-    st.markdown(
-        """
-        1. 각 플레이어는 자신에게 부여된 역할을 **조용히** 확인합니다.  
-        2. 오른쪽 질문 카드 중에서 **번갈아 가며** 하나씩 클릭합니다.  
-        3. 카드가 클릭되면, “만약 상대방이 그 역할이라면 할 법한 답변”이 화면에 나타납니다.  
-        4. 질문 카드가 다 사용되기 전에 상대방의 정체를 짐작할 수 있다면,  
-           아래의 **'정체 지목' 버튼**을 눌러 다음 페이지로 이동합니다.
-        """
-    )
-
-    # 좌/우 컬럼: 왼쪽은 역할 안내, 오른쪽은 질문 카드
-    col_left, col_right = st.columns([1, 2])
-
-    # -----------------------
-    # 왼쪽: 플레이어 역할 안내
-    # -----------------------
-    with col_left:
-        st.subheader("플레이어 역할 안내 (현실에서는 각자 따로 보기)")
-
-        st.markdown("**Player 1 역할 (교사):**")
-        st.info(get_role_name_by_code(st.session_state.player1_role))
-
-        st.markdown("**Player 2 역할 (학생):**")
-        st.info(get_role_name_by_code(st.session_state.player2_role))
-
-        st.caption(
-            "실제 플레이에서는 화면을 나눠 보거나, "
-            "각자 자기 역할만 보고 상대방에게는 보여주지 않도록 진행하세요."
+    with col1:
+        room_code = st.text_input(
+            "방 코드 (예: class1, 1234 등)",
+            value=st.session_state.room_code,
+            max_chars=20,
+        )
+        player_name = st.text_input(
+            "당신의 이름 또는 닉네임",
+            value=st.session_state.player_name,
+            max_chars=20,
         )
 
-    # -----------------------
-    # 오른쪽: 질문 카드들
-    # -----------------------
-    with col_right:
-        st.subheader("질문 카드")
+        if st.button("방 접속 / 만들기"):
+            if not room_code.strip() or not player_name.strip():
+                st.warning("방 코드와 이름을 모두 입력하세요.")
+            else:
+                st.session_state.room_code = room_code.strip()
+                st.session_state.player_name = player_name.strip()
+                room = get_or_create_room(st.session_state.room_code)
 
-        st.markdown("아래 6장의 질문 카드 중 하나를 선택해 클릭하세요.")
+                # 플레이어 등록 (최대 2명)
+                if st.session_state.player_id not in room["players"]:
+                    if len(room["players"]) >= 2:
+                        st.error("이 방에는 이미 2명이 접속해 있습니다. 다른 방 코드를 사용하세요.")
+                    else:
+                        room["players"][st.session_state.player_id] = {
+                            "name": st.session_state.player_name,
+                            "role_code": None,
+                        }
+                        st.session_state.joined = True
+                        st.session_state.my_role_code = None
+                        st.success("방에 접속했습니다. 상대방이 들어오기를 기다리세요.")
+                        st.rerun()
+                else:
+                    # 이미 이 세션이 등록되어 있는 경우
+                    st.session_state.joined = True
+                    st.success("이미 이 방에 접속해 있습니다.")
+                    st.rerun()
 
-        # 3x2 레이아웃으로 카드 배치
-        rows = [QUESTION_CARDS[:3], QUESTION_CARDS[3:]]
+    with col2:
+        # 현재 방 상태 표시
+        if st.session_state.room_code:
+            room = get_or_create_room(st.session_state.room_code)
+            st.subheader(f"현재 방: {st.session_state.room_code}")
+            if room["players"]:
+                st.write("접속한 플레이어:")
+                for info in room["players"].values():
+                    st.write(f"- {info['name']}")
+            else:
+                st.write("아직 접속한 플레이어가 없습니다.")
 
-        for row in rows:
-            cols = st.columns(3)
-            for card, c in zip(row, cols):
-                with c:
-                    clicked = st.button(
-                        f"카드 {card['id']}",
-                        key=f"qcard_{card['id']}",
-                    )
-                    st.caption(card["text"])
-                    if clicked:
-                        handle_question_click(card["id"], card["text"])
+            # 게임 시작 버튼 (2명 모두 들어왔을 때만)
+            if len(room["players"]) < 2:
+                st.info("두 명이 모두 접속하면 게임을 시작할 수 있습니다.")
+            else:
+                if not room["started"]:
+                    if st.button("게임 시작"):
+                        assign_roles_for_room(room)
+                        # 내 역할 코드 세션에 반영
+                        st.session_state.my_role_code = room["players"][st.session_state.player_id]["role_code"]
+                        st.success("게임이 시작되었습니다!")
+                        st.rerun()
+                else:
+                    st.success("게임이 이미 시작되었습니다.")
 
-        st.markdown("---")
-        st.subheader("질문 & 답변 로그")
-
-        if len(st.session_state.answer_log) == 0:
-            st.write("아직 선택한 질문이 없습니다.")
-        else:
-            for i, (qid, qtext, answer) in enumerate(st.session_state.answer_log, start=1):
-                st.markdown(f"**[{i}] 질문 {qid}:** {qtext}")
-                st.write(f"→ 답변: {answer}")
-                st.markdown("---")
-
-        st.markdown("### 정체 지목으로 넘어가기")
-
-        st.caption(
-            "질문 카드가 모두 사용되기 전이라도, "
-            "상대방의 역할을 어느 정도 짐작했다면 아래 버튼을 눌러보세요."
-        )
-
-        if st.button("정체 지목 페이지로 이동"):
-            st.session_state.current_page = 3
-            st.rerun()   # ⬅⬅ 여기도 수정
-
-
-def handle_question_click(question_id: int, question_text: str):
-    """질문 카드 클릭 시 동작: 상대방 역할 기준 답변 제공"""
-    # 여기서는 예시로 "Player1이 질문을 한다 → Player2 역할 기준으로 답변"
-    # 실제 수업 상황에 맞게, 누가 질문자인지 룰을 더 세밀하게 정해도 됩니다.
-    opponent_role_code = st.session_state.player2_role
-
-    # 역할별·질문별 답변에서 텍스트 가져오기
-    try:
-        answer = ROLE_ANSWERS[opponent_role_code][question_id]
-    except KeyError:
-        answer = "[TODO] 이 역할/질문 조합에 대한 답변이 아직 정의되지 않았습니다."
-
-    # 클릭한 질문 id 기록 (중복 클릭 체크용으로도 활용 가능)
-    if question_id not in st.session_state.clicked_questions:
-        st.session_state.clicked_questions.append(question_id)
-
-    # 로그에 추가
-    st.session_state.answer_log.append((question_id, question_text, answer))
+    # 방에 정상 접속한 상태이고, 게임도 시작되었다면 메인 게임 화면으로
+    if st.session_state.joined and st.session_state.room_code:
+        room = get_or_create_room(st.session_state.room_code)
+        if room["started"]:
+            # 내 역할 코드 동기화
+            my_info = room["players"].get(st.session_state.player_id)
+            if my_info:
+                st.session_state.my_role_code = my_info.get("role_code")
+            st.markdown("---")
+            render_game(room)
 
 
-def render_page3():
-    """페이지 3 - 정체 지목 & 결과"""
-    st.header("페이지 3: 상대방 정체 지목")
+# ============================================================
+# 4. UI: 메인 게임 화면 (질문 카드 + 정체 지목)
+# ============================================================
+
+def render_game(room):
+    # 페이지 2+3을 합친 메인 플레이 화면
+    st.subheader("당신의 비밀 역할")
+
+    if st.session_state.my_role_code is None:
+        st.warning("아직 역할이 배정되지 않았습니다. 상대방과 함께 '게임 시작'을 눌러주세요.")
+        return
+
+    my_role_name = get_role_name_by_code(st.session_state.my_role_code)
+    st.info(f"당신의 역할: **{my_role_name}**")
 
     st.markdown(
         """
-        이제까지의 질문과 답변을 바탕으로,  
-        **상대방의 정체(역할)가 누구라고 생각하는지** 적어보세요.
+        - 이 역할은 **당신만** 알고 있어야 합니다.  
+        - 질문 카드를 활용해, 상대방의 정체가 누구인지 추리해 보세요.
         """
     )
 
-    st.markdown("#### 선택 가능한 역할 목록")
+    st.markdown("---")
+    st.subheader("질문 카드")
+
+    st.markdown("질문 카드를 클릭하면, **상대방이 그 역할이라면 할 법한 답변**이 나타납니다.")
+
+    # 질문 카드 배치 (3x2)
+    rows = [QUESTION_CARDS[:3], QUESTION_CARDS[3:]]
+
+    for row in rows:
+        cols = st.columns(3)
+        for card, c in zip(row, cols):
+            with c:
+                if st.button(f"카드 {card['id']}", key=f"qcard_{card['id']}"):
+                    handle_question_click(room, card["id"], card["text"])
+                st.caption(card["text"])
+
+    st.markdown("---")
+    st.subheader("질문 & 답변 기록")
+
+    if not room["question_log"]:
+        st.write("아직 질문이 없습니다.")
+    else:
+        for i, (qid, qtext, answer, pid) in enumerate(room["question_log"], start=1):
+            # 누가 질문했는지는 필요 없으면 표시 안 해도 됨
+            st.markdown(f"**[{i}] 질문 {qid}:** {qtext}")
+            st.write(f"→ 답변: {answer}")
+            st.markdown("---")
+
+    st.markdown("---")
+    render_guess_section(room)
+
+
+def handle_question_click(room, question_id: int, question_text: str):
+    """질문 카드 클릭 시, 상대방 역할 기준 답변 생성"""
+    opponent_role_code = get_opponent_role_code(room, st.session_state.player_id)
+
+    if opponent_role_code is None:
+        answer = "상대방의 역할이 아직 정해지지 않았습니다."
+    else:
+        try:
+            answer = ROLE_ANSWERS[opponent_role_code][question_id]
+        except KeyError:
+            answer = "[TODO] 이 역할/질문 조합에 대한 답변이 아직 정의되지 않았습니다."
+
+    # 방 전체에 공유되는 질문/답변 로그에 추가
+    room["question_log"].append(
+        (question_id, question_text, answer, st.session_state.player_id)
+    )
+    st.rerun()
+
+
+def render_guess_section(room):
+    st.subheader("상대방 정체 지목")
+
+    st.markdown(
+        """
+        지금까지의 질문과 답변을 바탕으로,  
+        **상대방의 역할이 누구라고 생각하는지** 입력해 보세요.
+        """
+    )
+
+    st.markdown("선택 가능한 역할:")
     role_names = [get_role_name_by_code(r["code"]) for r in ROLES]
     st.write(", ".join(role_names))
 
-    st.markdown("---")
-
-    # 텍스트 입력으로 추측 (학생/교사 중 실제로 입력할 사람을 정해서)
     guess = st.text_input(
         "상대방의 정체를 입력하세요 (예: 니체, 한병철, 성과사회의 성과주체 등)",
-        value=st.session_state.get("guess_input", ""),
+        value=st.session_state.guess_input,
     )
 
     if st.button("정답 확인"):
         st.session_state.guess_input = guess
 
-        # 실제 상대방 역할: 여기서는 예시로 Player2를 '상대방'으로 간주
-        real_role_name = get_role_name_by_code(st.session_state.player2_role)
-
-        if guess.strip() == real_role_name:
-            st.session_state.result_message = f"정답입니다! 상대방의 정체는 **{real_role_name}** 이었습니다."
+        opponent_role_code = get_opponent_role_code(room, st.session_state.player_id)
+        if opponent_role_code is None:
+            st.session_state.result_message = "상대방의 역할이 아직 정해지지 않았습니다."
         else:
-            st.session_state.result_message = (
-                f"아쉽지만 오답입니다. "
-                f"실제 상대방의 정체는 **{real_role_name}** 이었습니다."
-            )
+            real_role_name = get_role_name_by_code(opponent_role_code)
+            if guess.strip() == real_role_name:
+                st.session_state.result_message = f"정답입니다! 상대방의 정체는 **{real_role_name}** 이었습니다."
+            else:
+                st.session_state.result_message = (
+                    f"아쉽지만 오답입니다. 실제 상대방의 정체는 **{real_role_name}** 이었습니다."
+                )
 
-    if st.session_state.get("result_message"):
+    if st.session_state.result_message:
         st.success(st.session_state.result_message)
-
-    st.markdown("---")
-    if st.button("다시 시작하기"):
-        init_game_state()
-        st.session_state.current_page = 1
-        st.rerun()   # ⬅⬅ 여기도 수정
 
 
 # ============================================================
-# 3. 메인 실행부
+# 5. 메인 실행부
 # ============================================================
 
 def main():
-    st.title("피로사회 마피아 게임 (Streamlit 골격)")
-
-    ensure_state()
-
-    # 간단한 상단 네비게이션 (디버그/개발 편의용)
-    page = st.session_state.current_page
-
-    tabs = st.tabs(["페이지 1: 시작", "페이지 2: 질문 카드", "페이지 3: 정체 지목"])
-    with tabs[0]:
-        if page == 1:
-            render_page1()
-        else:
-            st.caption("현재 게임 상태에서는 이 페이지는 시작 상태를 보여줍니다.")
-            render_page1()
-
-    with tabs[1]:
-        if page == 2:
-            render_page2()
-        else:
-            st.caption("정식 흐름에서는 '게임 시작'을 먼저 눌러 주세요.")
-            render_page2()
-
-    with tabs[2]:
-        if page == 3:
-            render_page3()
-        else:
-            st.caption("정식 흐름에서는 질문을 어느 정도 한 뒤에 넘어옵니다.")
-            render_page3()
+    init_session_state()
+    render_lobby()
 
 
 if __name__ == "__main__":
