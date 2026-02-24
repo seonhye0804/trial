@@ -245,9 +245,7 @@ def render_guess_section():
         """
     )
 
-    role_names = [get_role_name_by_code(r["code"]) for r in ROLES]
-    st.markdown("선택 가능한 역할: " + ", ".join(role_names))
-    st.markdown("---")
+   
 
     colA, colB = st.columns(2)
 
